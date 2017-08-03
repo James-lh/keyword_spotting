@@ -107,7 +107,7 @@ class Classifier(object):
             else:
                 self.pre_word = -1
             i += 1
-        string = self.strings[-1] + "".join([i[0] for i in result])
+        string = self.strings[-1] + "".join([str(i[0]) for i in result])
         if len(self.strings) >= self.window_size:
             del (self.strings[0])
         self.strings.append(string)
@@ -268,9 +268,9 @@ class HotwordDetector(object):
             ['model/softmax:0', 'model/logit:0', 'model/rnn_states:0'],
             feed_dict={'model/inputX:0': y,
                        'model/rnn_initial_states:0': self.state})
-        result = ctc_decode(softmax)
+        result = self.classifier.ctc_decode2(softmax,config.num_classes)
         print(result)
-        if ctc_predict(result, '1233'):
+        if self.classifier.evaluate(result, '1233'):
             detected_callback()
         colors = ['r', 'b', 'g', 'm', 'y', 'k']
 
@@ -282,7 +282,7 @@ class HotwordDetector(object):
         print(softmax.shape)
         print(test.tolist())
         x = range(len(y))
-        plt.figure(figsize=(20, 15), dpi=120)  # 创建绘图对象
+        plt.figure(figsize=(24, 15), dpi=120)  # 创建绘图对象
         plt.xticks(fontsize=40)
         plt.yticks(fontsize=40)
         p1 = plt.subplot(211)
@@ -339,7 +339,7 @@ class HotwordDetector(object):
         colors = ['r', 'b', 'g', 'm', 'y', 'k']
         y = softmax
         x = range(len(y))
-        plt.figure(figsize=(10, 4))  # 创建绘图对象
+        plt.figure(figsize=(12, 4))  # 创建绘图对象
 
         for i in range(1, y.shape[1]):
             plt.plot(x, y[:, i], colors[i], linewidth=1, label=str(i))
@@ -375,10 +375,10 @@ if __name__ == '__main__':
 
     # main loop
 
-    detector.start(detected_callback=play_audio_file,
-                   interrupt_check=interrupt_callback,
-                   sleep_time=0.03)
+    # detector.start(detected_callback=play_audio_file,
+    #                interrupt_check=interrupt_callback,
+    #                sleep_time=0.03)
+    #
 
 
-
-    # detector.test('s_C83548A62565E944_你好乐乐.wav')
+    detector.test('trigger.wav')
