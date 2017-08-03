@@ -263,25 +263,27 @@ class Runner(object):
             else:
                 with open(
                                         config.rawdata_path + 'valid/' + "ctc_valid.pkl.sorted",
-                                        'rb') as f:
+                        'rb') as f:
                     pkl = pickle.load(f)
                 miss_count = 0
                 false_count = 0
                 target_count = 0
 
                 valid_batch = self.data.valid_file_size * config.tfrecord_size // config.batch_size
-
+                _, _ = sess.run([self.valid_model.stage_op,
+                                 self.valid_model.input_filequeue_enqueue_op])
                 for i in range(valid_batch):
                     # if i > 7:
                     #     break
-                    ind = 14
+
                     softmax, ctc_input, correctness, labels, _, _ = sess.run(
                         [self.valid_model.softmax,
                          self.valid_model.nn_outputs,
                          self.valid_model.correctness,
                          self.valid_model.labels,
                          self.valid_model.stage_op,
-                         self.valid_model.input_filequeue_enqueue_op])
+                         self.valid_model.input_filequeue_enqueue_op
+                         ])
                     np.set_printoptions(precision=4,
                                         threshold=np.inf,
                                         suppress=True)
@@ -292,12 +294,13 @@ class Runner(object):
                               for seq in
                               decode_output]
                     for k, r in enumerate(result):
-                        if r != correctness[k]:
+                        if r == 1 and correctness[k] == 0:
+                            # if r != correctness[k]:
                             name = pkl[i * config.batch_size + k][0]
-                            print("scp liuziqi@10.8.0.62:/ssd/keyword_raw/valid/%s ./"%name)
-                            # print(pkl[i * config.batch_size + k])
-                            # print(decode_output[k])
-                            # print(labels[k])
+                            # print("scp liuziqi@10.8.0.62:/ssd/keyword_raw/valid/%s ./"%name)
+                            print(pkl[i * config.batch_size + k])
+                            print(decode_output[k])
+                            print(labels[k])
                             with open('logits.txt', 'w') as f:
                                 f.write(str(ctc_input[k]))
 

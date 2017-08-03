@@ -28,7 +28,7 @@ import tensorflow as tf
 
 from config.rnn_config import get_config
 from utils.basic_vad import vad
-from utils.prediction import ctc_predict, ctc_decode,ctc_decode2
+from utils.prediction import ctc_predict, ctc_decode, ctc_decode2
 from utils.queue import SimpleQueue
 
 interrupted = False
@@ -79,6 +79,53 @@ class RingBuffer(object):
         return float32
 
 
+class Classifier(object):
+    def __init__(self, thres=0.5, lockout=3, window_size=15):
+        self.thres = thres
+        self.lockout = lockout
+        self.window_size = window_size
+
+        self.pre_word = -1
+        self.strings = ['']
+
+        # this is just for debug
+        self.prob_queue = SimpleQueue(15)
+
+    def ctc_decode2(self, softmax, classnum, thres=0.4):
+        softmax = softmax[:, 1:classnum - 1]
+        i = 0
+        result = []
+        length = softmax.shape[0]
+
+        while (i < length):
+
+            if (softmax[i, :].max() > thres):
+                pos = softmax[i, :].argmax()
+                if self.pre_word == -1 or self.pre_word != pos:
+                    result.append((pos + 1, i))
+                self.pre_word = pos
+            else:
+                self.pre_word = -1
+            i += 1
+        string = self.strings[-1] + "".join([i[0] for i in result])
+        if len(self.strings) >= self.window_size:
+            del (self.strings[0])
+        self.strings.append(string)
+
+        return string
+
+    def evaluate(self, seq, label):
+        return label in seq
+
+    def clean(self):
+        self.pre_word = -1
+        self.strings = ['']
+        self.prob_queue.clear()
+
+    def softmax_all(self):
+        return self.prob_queue.get_all()
+
+
 def play_audio_file(fname=DETECT_SOUND):
     """Simple callback function to play a wave file. By default it plays
     a Ding sound.
@@ -119,7 +166,6 @@ class HotwordDetector(object):
             frames_per_buffer=3600,
             stream_callback=audio_callback)
         self.npdata = []
-        self.prob_queue = SimpleQueue(15)
         self.state = np.zeros([config.num_layers, 1, config.hidden_size],
                               dtype=np.float32)
         self.res = np.zeros([0], np.float32)
@@ -127,9 +173,9 @@ class HotwordDetector(object):
                                              fmin=config.fmin,
                                              fmax=config.fmax,
                                              n_mels=config.freq_size).T
-        self.seg_count = 0
-        self.prev_speech = True
+        self.non_speech_count = 0
         self.logits = []
+        self.classifier = Classifier()
 
         self.graph_def = tf.GraphDef()
         self.config = config
@@ -165,16 +211,17 @@ class HotwordDetector(object):
                     time.sleep(sleep_time)
                     continue
 
-                if vad(data, 30):
-                    pass
-                    self.prev_speech = True
+                if vad(data, 40):
+                    self.non_speech_count = 0
                 else:
                     # if self.prev_speech:
                     #     self.prev_speech = False
                     #     self.clean_state()
                     #     self.prob_queue.clear()
-                    self.clean_state()
-                    self.prob_queue.clear()
+                    self.non_speech_count += 1
+                    if self.non_speech_count >= 2:
+                        self._clear_state()
+                        self.non_speech_count = 0
 
                 data = np.concatenate((self.res, data), 0)
 
@@ -192,20 +239,20 @@ class HotwordDetector(object):
                     feed_dict={'model/inputX:0': data,
                                'model/rnn_initial_states:0': self.state})
 
-                self.prob_queue.add(softmax)
+                self.classifier.prob_queue.add(softmax)
                 self.state = state
-                concated_soft = np.concatenate(self.prob_queue.get_all(), 0)
+                concated_soft = np.concatenate(
+                    self.classifier.prob_queue.get_all(), 0)
                 print(concated_soft.shape)
 
-                result = ctc_decode2(concated_soft,config.num_classes)
-                if ctc_predict(result,'1233'):
+                result = ctc_decode2(concated_soft, config.num_classes)
+                if ctc_predict(result, '1233'):
                     detected_callback()
-                    self.prob_queue.clear()
                     librosa.output.write_wav('./trigger.wav',
                                              np.concatenate(self.npdata, 0),
                                              16000)
                     self.npdata = []
-                    self.clean_state()
+                    self.clean()
                     self.plot(concated_soft, 'trigger.png')
 
         logger.debug("finished.")
@@ -223,7 +270,7 @@ class HotwordDetector(object):
                        'model/rnn_initial_states:0': self.state})
         result = ctc_decode(softmax)
         print(result)
-        if ctc_predict(result,'1233'):
+        if ctc_predict(result, '1233'):
             detected_callback()
         colors = ['r', 'b', 'g', 'm', 'y', 'k']
 
@@ -262,7 +309,7 @@ class HotwordDetector(object):
         res = np.zeros([0], np.float32)
         origin_state = np.zeros([2, 1, 128], np.float32)
         data = []
-        accu=np.zeros([0,6],np.float32)
+        accu = np.zeros([0, 6], np.float32)
         print(seg_num)
         for i in range(seg_num + 1):
             print(i)
@@ -282,10 +329,10 @@ class HotwordDetector(object):
                 feed_dict={'model/inputX:0': data,
                            'model/rnn_initial_states:0': origin_state})
             origin_state = state
-            accu = np.concatenate((accu,softmax),0)
+            accu = np.concatenate((accu, softmax), 0)
             print(softmax.flatten().tolist())
 
-        a=ctc_decode(accu)
+        a = ctc_decode(accu)
         print(a)
 
     def plot(self, softmax, name='figure.png'):
@@ -307,10 +354,14 @@ class HotwordDetector(object):
         import librosa
         librosa.output.write_wav('./temp.wav', np.concatenate(self.npdata, 0),
                                  16000)
-        softmax = np.concatenate(self.prob_queue.get_all(), 0)
+        softmax = np.concatenate(self.classifier.prob_queue.get_all(), 0)
         self.plot(softmax)
 
-    def clean_state(self):
+    def clean(self):
+        self._clear_state()
+        self.classifier.clean()
+
+    def _clear_state(self):
         self.state = np.zeros([config.num_layers, 1, config.hidden_size],
                               dtype=np.float32)
         print('clean state')
