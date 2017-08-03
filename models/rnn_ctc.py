@@ -20,7 +20,7 @@ import tensorflow as tf
 from utils.common import describe
 from utils.stft import tf_frame
 from utils.custom_wrapper import LayerNormalizer, ResidualWrapper, \
-    HighwayWrapper
+    HighwayWrapper,NoisyInitWrapper
 from tensorflow.python.ops.rnn import dynamic_rnn
 from tensorflow.contrib.rnn import GRUCell
 import librosa
@@ -183,18 +183,18 @@ def get_cell(config, is_training, layer):
                    activation=tf.tanh,
                    reuse=tf.get_variable_scope().reuse
                    )
-    if config.use_layer_norm:
-        cell = LayerNormalizer(cell)
-    # add wrappers: ln -> dropout -> residual
+
     if is_training:
+        if config.noisy_state:
+            cell = NoisyInitWrapper(cell)
         if config.keep_prob < 1:
             cell = tf.contrib.rnn.DropoutWrapper(cell,
                                                  output_keep_prob=config.keep_prob,
                                                  dtype=tf.float32,
                                                  variational_recurrent=config.variational_recurrent
                                                  )
-    if config.use_residual and layer > 0:
-        cell = ResidualWrapper(cell)
+    # if config.use_residual and layer > 0:
+    #     cell = ResidualWrapper(cell)
 
     return cell
 

@@ -68,8 +68,8 @@ class Config(object):
         self.use_white_noise = False
         self.use_bg_noise = True
         self.bg_noise_prob_raise = 1.05
-        self.bg_decay_max_db = -5
-        self.bg_decay_min_db = -15
+        self.bg_decay_max_db = -5  # must be carefully tuned
+        self.bg_decay_min_db = -15  # must be carefully tuned
         self.bg_noise_prob = 0.5
 
         # model params
@@ -78,11 +78,12 @@ class Config(object):
         self.use_residual = False
         self.use_layer_norm = False
         self.value_clip = -1
-        self.keep_prob = 0.6  # n_mel=60 must use higher keep_prob
+        self.keep_prob = 0.6  # must be carefully tuned
         self.variational_recurrent = False
         self.use_relu = False
         self.hidden_size = 128
         self.cell_clip = 3.
+        self.noisy_state = False
 
     @property
     def num_classes(self):

@@ -12,6 +12,7 @@ This file contains custom wrapper for different cells
 
 @desc:
 '''
+from tensorflow.python.framework import ops
 from __future__ import absolute_import
 from tensorflow.contrib.rnn.python.ops.core_rnn_cell import RNNCell
 from tensorflow.python.ops import array_ops
@@ -19,9 +20,8 @@ import tensorflow as tf
 
 
 class RNNWrapper(RNNCell):
-    @property
-    def input_size(self):
-        return self._cell.input_size
+    def __init__(self, cell):
+        self._cell = cell
 
     @property
     def state_size(self):
@@ -31,6 +31,14 @@ class RNNWrapper(RNNCell):
     def output_size(self):
         return self._cell.output_size
 
+    def zero_state(self, batch_size, dtype):
+        with ops.name_scope(type(self).__name__ + "ZeroState",
+                            values=[batch_size]):
+            return self._cell.zero_state(batch_size, dtype)
+
+    def __call__(self, inputs, state, scope=None):
+        self._cell(inputs, state, scope)
+
 
 class HighwayWrapper(RNNWrapper):
     """Implementing https://arxiv.org/pdf/1505.00387v2.pdf, need to making
@@ -38,7 +46,7 @@ class HighwayWrapper(RNNWrapper):
     """
 
     def __init__(self, cell, weights):
-        self._cell = cell
+        super().__init__(cell)
         self._weights = weights
 
     def __call__(self, inputs, state, scope=None):
@@ -64,12 +72,12 @@ class ClockworkWrapper(RNNWrapper):
           TypeError: if cell is not an RNNCell.
           ValueError: if period is not an int.
         """
+        super().__init__(cell)
         if not isinstance(cell, RNNCell):
             raise TypeError("The parameter cell is not a RNNCell.")
         if not isinstance(period, int):
             raise ValueError("Parameter period must be an integer: %d" %
                              period)
-        self._cell = cell
         self._period = period
         self._state_buffer = None
         self._buffer_index = period - 1
@@ -105,10 +113,9 @@ class ResidualWrapper(RNNWrapper):
         Raises:
           TypeError: if cell is not an RNNCell.
         """
+        super().__init__(cell)
         if not isinstance(cell, RNNCell):
             raise TypeError("The parameter cell is not a RNNCell.")
-
-        self._cell = cell
 
     def __call__(self, inputs, state, scope=None):
         """Run the cell with the clockwork state."""
@@ -137,6 +144,7 @@ class LayerNormalizer(RNNWrapper):
         Raises:
           TypeError: if cell is not an RNNCell.
         """
+        super().__init__(cell)
         if not isinstance(cell, RNNCell):
             raise TypeError("The parameter cell is not a RNNCell.")
 
@@ -156,3 +164,20 @@ class LayerNormalizer(RNNWrapper):
 
         output, new_state = self._cell(inputs, state, scope)
         return output, new_state
+
+
+class NoisyInitWrapper(RNNWrapper):
+    def __init__(self, cell, mean=0, stddev=0.3, seed=None):
+        super().__init__(cell)
+        self.mean = mean
+        self.stddev = stddev
+        self.seed = seed
+
+    def zero_state(self, batch_size, dtype):
+        with ops.name_scope(type(self).__name__ + "ZeroState",
+                            values=[batch_size]):
+            zero_state = self._cell.zero_state(batch_size, dtype)
+            return zero_state + tf.random_normal(tf.shape(zero_state),
+                                                 self.mean, self.stddev,
+                                                 dtype=dtype, seed=self.stddev,
+                                                 name='initial_state_noise')
